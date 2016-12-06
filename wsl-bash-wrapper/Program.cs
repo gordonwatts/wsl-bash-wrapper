@@ -7,6 +7,11 @@ using System.Threading.Tasks;
 
 namespace BashWrapper
 {
+    enum AppToRun
+    {
+        Bash,
+        Lxrun
+    }
     // Run the arguments against bash.
     class Program {
 		static void Main( string[] bash_args ) {
@@ -18,15 +23,22 @@ namespace BashWrapper
                 bash_args = bash_args.Skip(1).ToArray();
                 verbose = true;
             }
+            var app = AppToRun.Bash;
+            if (bash_args.FirstOrDefault() == "--lxrun")
+            {
+                app = AppToRun.Lxrun;
+            }
 
+            // Get the temp file and start the bash script running.
+            // While running, fetch back the contents of the file as it is
+            // updated.
             var tmp_win_path = Path.GetTempFileName();
             try
             {
-                // Run bash and cache the error code
-                Process p = StartBashAndSaveOutput(bash_args, tmp_win_path, verbose);
-
+                Process p = StartBashAndSaveOutput(bash_args, tmp_win_path, verbose, app);
                 ContinuousCopyFileToStdout(tmp_win_path, () => p.HasExited).Wait();
 
+                // Finished as expected. Grab exit code and return to host.
                 var ret = p.ExitCode;
                 if (verbose)
                 {
@@ -108,7 +120,7 @@ namespace BashWrapper
             }
         }
 
-        private static Process StartBashAndSaveOutput(string[] args, string tmp_win_path, bool verbose)
+        private static Process StartBashAndSaveOutput(string[] args, string tmp_win_path, bool verbose, AppToRun whatApp)
         {
             try
             {
@@ -131,7 +143,7 @@ namespace BashWrapper
                     first = false;
                 }
 
-                p.StartInfo.FileName = FindBash();
+                p.StartInfo.FileName = FindBash(whatApp);
                 p.StartInfo.Arguments = p_args + " &> " + tmp_wsl_path;
                 p.StartInfo.WorkingDirectory = Directory.GetCurrentDirectory();
 
@@ -158,20 +170,29 @@ namespace BashWrapper
             }
         }
 
-        static string FindBash() {
-			var path = Path.GetFullPath( Environment.ExpandEnvironmentVariables( @"%windir%\SysWow64\bash.exe" ) );
+        static string FindBash(AppToRun whatApp) {
+            var app =
+                whatApp == AppToRun.Bash ? "bash.exe"
+                : whatApp == AppToRun.Lxrun ? "lxrun.exe"
+                : null;
+            if (app == null)
+            {
+                throw new ArgumentException($"Do not know what executable to look for for {whatApp}.");
+            }
+
+			var path = Path.GetFullPath( Environment.ExpandEnvironmentVariables( $"%windir%\\SysWow64\\{app}" ) );
 			if( File.Exists( path ) )
 				return path;
 
-			path = Path.GetFullPath( Environment.ExpandEnvironmentVariables( @"%windir%\sysnative\bash.exe" ) );
+			path = Path.GetFullPath( Environment.ExpandEnvironmentVariables( $"%windir%\\sysnative\\{app}" ) );
 			if( File.Exists( path ) )
 				return path;
 
-			path = Path.GetFullPath( Environment.ExpandEnvironmentVariables( @"%windir%\System32\bash.exe" ) );
+			path = Path.GetFullPath( Environment.ExpandEnvironmentVariables( $"%windir%\\System32\\{app}" ) );
 			if( File.Exists( path ) )
 				return path;
 
-			throw new Exception("Could not find a path to Bash!");
+			throw new Exception($"Could not find a path to {app}!");
 		}
 
 		static string ConvertPathToWSL( string p ) {
